@@ -1,0 +1,256 @@
+From abcaf26a7ca904011cbd512c253ce2764b1b90ff Mon Sep 17 00:00:00 2001
+From: "FeRD (Frank Dana)" <ferdnyc@gmail.com>
+Date: Sun, 26 May 2024 08:01:27 -0400
+Subject: [PATCH 1/4] Add linkable shell script launchers
+
+* Rename `gsconnect-preferences` to `preferences-app.js` and remove
+  its shebang line.
+* Add a `gsconnect-preferences.sh` shell script that will launch
+  `preferences-app.js` in `gjs` correctly, even if symlinked.
+* Add a `gsconnect.sh` that will do the same for `service/daemon.js`.
+* Use `gsconnect-preferences.sh` to launch `preferences-app.js`
+  from `prefs.js`.
+---
+ src/gsconnect-preferences.sh                      | 12 ++++++++++++
+ src/gsconnect.sh                                  | 12 ++++++++++++
+ src/{gsconnect-preferences => preferences-app.js} |  2 --
+ src/prefs.js                                      |  2 +-
+ src/shell/utils.js                                |  3 ++-
+ 5 files changed, 27 insertions(+), 4 deletions(-)
+ create mode 100755 src/gsconnect-preferences.sh
+ create mode 100755 src/gsconnect.sh
+ rename src/{gsconnect-preferences => preferences-app.js} (99%)
+ mode change 100755 => 100644
+
+diff --git a/src/gsconnect-preferences.sh b/src/gsconnect-preferences.sh
+new file mode 100755
+index 000000000..5c681c44f
+--- /dev/null
++++ b/src/gsconnect-preferences.sh
+@@ -0,0 +1,12 @@
++#!/bin/env sh
++
++# SPDX-FileCopyrightText: GSConnect Developers https://github.com/GSConnect
++#
++# SPDX-License-Identifier: GPL-2.0-or-later
++
++case "$0" in
++    */*) EXTENSION_DIR=$(dirname $(realpath "$0")) ;;
++    *) EXTENSION_DIR=$(dirname $(realpath $(which $0))) ;;
++esac
++exec /bin/env gjs -m "${EXTENSION_DIR}/preferences-app.js" "$@"
++
+diff --git a/src/gsconnect.sh b/src/gsconnect.sh
+new file mode 100755
+index 000000000..7ff8ebf4b
+--- /dev/null
++++ b/src/gsconnect.sh
+@@ -0,0 +1,12 @@
++#!/bin/env sh
++
++# SPDX-FileCopyrightText: GSConnect Developers https://github.com/GSConnect
++#
++# SPDX-License-Identifier: GPL-2.0-or-later
++
++case "$0" in
++    */*) EXTENSION_DIR=$(dirname $(realpath "$0")) ;;
++    *) EXTENSION_DIR=$(dirname $(realpath $(which $0))) ;;
++esac
++exec /bin/env gjs -m "${EXTENSION_DIR}/service/daemon.js" "$@"
++
+diff --git a/src/gsconnect-preferences b/src/preferences-app.js
+old mode 100755
+new mode 100644
+similarity index 99%
+rename from src/gsconnect-preferences
+rename to src/preferences-app.js
+index b16ddc7dc..e2b1efe9d
+--- a/src/gsconnect-preferences
++++ b/src/preferences-app.js
+@@ -1,5 +1,3 @@
+-#!/usr/bin/env -S gjs -m
+-
+ // SPDX-FileCopyrightText: GSConnect Developers https://github.com/GSConnect
+ //
+ // SPDX-License-Identifier: GPL-2.0-or-later
+diff --git a/src/prefs.js b/src/prefs.js
+index 4a94ca7b8..9bc2666a2 100644
+--- a/src/prefs.js
++++ b/src/prefs.js
+@@ -26,7 +26,7 @@ export default class GSConnectExtensionPreferences extends ExtensionPreferences
+             window.close();
+         });
+ 
+-        Gio.Subprocess.new([`${this.path}/gsconnect-preferences`], 0);
++        Gio.Subprocess.new([`${this.path}/gsconnect-preferences.sh`], 0);
+     }
+ }
+ 
+diff --git a/src/shell/utils.js b/src/shell/utils.js
+index beea46244..6e7be41bd 100644
+--- a/src/shell/utils.js
++++ b/src/shell/utils.js
+@@ -170,7 +170,8 @@ function _setExecutable(filepath) {
+ export function ensurePermissions() {
+     if (Config.IS_USER) {
+         const executableFiles = [
+-            'gsconnect-preferences',
++            'gsconnect-preferences.sh',
++            'gsconnect.sh',
+             'service/daemon.js',
+             'service/nativeMessagingHost.js',
+         ];
+
+From aa1eac3fce8b0f77b5525baa32b893cb5f8fcb64 Mon Sep 17 00:00:00 2001
+From: "FeRD (Frank Dana)" <ferdnyc@gmail.com>
+Date: Sun, 26 May 2024 10:10:09 -0400
+Subject: [PATCH 2/4] Make tools launchable without runAsync
+
+For CLI use in environments without latest Gtk.
+---
+ src/preferences-app.js | 7 ++++++-
+ src/service/daemon.js  | 7 +++++--
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/src/preferences-app.js b/src/preferences-app.js
+index e2b1efe9d..57e529782 100644
+--- a/src/preferences-app.js
++++ b/src/preferences-app.js
+@@ -99,4 +99,9 @@ const Preferences = GObject.registerClass({
+     }
+ });
+ 
+-await (new Preferences()).runAsync([system.programInvocationName].concat(ARGV));
++const prefs = new Preferences();
++if (prefs.hasOwnProperty('runAsync'))
++    await prefs.runAsync([system.programInvocationName].concat(ARGV));
++else
++    prefs.run([system.programInvocationName].concat(ARGV));
++
+diff --git a/src/service/daemon.js b/src/service/daemon.js
+index 1ddb3569f..a4291d772 100755
+--- a/src/service/daemon.js
++++ b/src/service/daemon.js
+@@ -698,5 +698,8 @@ const Service = GObject.registerClass({
+     }
+ });
+ 
+-await (new Service()).runAsync([system.programInvocationName].concat(ARGV));
+-
++const service = new Service();
++if (service.hasOwnProperty('runAsync'))
++    await service.runAsync([system.programInvocationName].concat(ARGV));
++else
++    service.run([system.programInvocationName].concat(ARGV));
+
+From 54979a5024294014addab22428475d1de9ec8218 Mon Sep 17 00:00:00 2001
+From: "FeRD (Frank Dana)" <ferdnyc@gmail.com>
+Date: Mon, 27 May 2024 13:23:47 -0400
+Subject: [PATCH 3/4] Revert "Make tools launchable without runAsync"
+
+This reverts commit aa1eac3fce8b0f77b5525baa32b893cb5f8fcb64.
+---
+ src/preferences-app.js | 7 +------
+ src/service/daemon.js  | 7 ++-----
+ 2 files changed, 3 insertions(+), 11 deletions(-)
+
+diff --git a/src/preferences-app.js b/src/preferences-app.js
+index 57e529782..e2b1efe9d 100644
+--- a/src/preferences-app.js
++++ b/src/preferences-app.js
+@@ -99,9 +99,4 @@ const Preferences = GObject.registerClass({
+     }
+ });
+ 
+-const prefs = new Preferences();
+-if (prefs.hasOwnProperty('runAsync'))
+-    await prefs.runAsync([system.programInvocationName].concat(ARGV));
+-else
+-    prefs.run([system.programInvocationName].concat(ARGV));
+-
++await (new Preferences()).runAsync([system.programInvocationName].concat(ARGV));
+diff --git a/src/service/daemon.js b/src/service/daemon.js
+index a4291d772..1ddb3569f 100755
+--- a/src/service/daemon.js
++++ b/src/service/daemon.js
+@@ -698,8 +698,5 @@ const Service = GObject.registerClass({
+     }
+ });
+ 
+-const service = new Service();
+-if (service.hasOwnProperty('runAsync'))
+-    await service.runAsync([system.programInvocationName].concat(ARGV));
+-else
+-    service.run([system.programInvocationName].concat(ARGV));
++await (new Service()).runAsync([system.programInvocationName].concat(ARGV));
++
+
+From 37b30f8795aff60bfa85879006d69ae87eb22761 Mon Sep 17 00:00:00 2001
+From: "FeRD (Frank Dana)" <ferdnyc@gmail.com>
+Date: Wed, 12 Jun 2024 00:57:51 -0400
+Subject: [PATCH 4/4] Update launcher scripts with file check, docs
+
+- Add a check that the relevant JS file exists in the expected location,
+  before attempting to execute it. Display a message to stderr, if it's
+  not found.
+- Add a comment above the code, detailing how to symlink the script
+  into a directory on the $PATH.
+---
+ src/gsconnect-preferences.sh | 14 +++++++++++++-
+ src/gsconnect.sh             | 14 +++++++++++++-
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/src/gsconnect-preferences.sh b/src/gsconnect-preferences.sh
+index 5c681c44f..386c9f4fb 100755
+--- a/src/gsconnect-preferences.sh
++++ b/src/gsconnect-preferences.sh
+@@ -4,9 +4,21 @@
+ #
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ 
++# To use this script as a `gsconnect-preferences` command from any
++# directory (e.g. $HOME/.local/bin, /usr/local/bin/, or somewhere else
++# on your $PATH), you can SYMLINK (do not copy!) it into that location.
++#
++# e.g:
++# D="$HOME/.local/share/gnome-shell/extensions/gsconect@anyholmes.github.io"
++# ln -s $D/gsconnect-preferences.sh $HOME/.local/bin/gsconnect-preferences
++
+ case "$0" in
+     */*) EXTENSION_DIR=$(dirname $(realpath "$0")) ;;
+     *) EXTENSION_DIR=$(dirname $(realpath $(which $0))) ;;
+ esac
++if [ ! -f "${EXTENSION_DIR}/preferences-app.js" ]; then
++    >&2 echo "Cannot find preferences-app.js relative to script location!"
++    >&2 echo "Perhaps you copied the script instead of symlinking it?"
++    exit -1
++fi
+ exec /bin/env gjs -m "${EXTENSION_DIR}/preferences-app.js" "$@"
+-
+diff --git a/src/gsconnect.sh b/src/gsconnect.sh
+index 7ff8ebf4b..d8b6fc53e 100755
+--- a/src/gsconnect.sh
++++ b/src/gsconnect.sh
+@@ -4,9 +4,21 @@
+ #
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ 
++# To use this script as a `gsconnect` command from any directory
++# (e.g. $HOME/.local/bin, /usr/local/bin/, or somewhere else on your
++# $PATH), you can SYMLINK (do not copy!) it into that location.
++#
++# e.g:
++# D="$HOME/.local/share/gnome-shell/extensions/gsconect@anyholmes.github.io"
++# ln -s $D/gsconnect.sh $HOME/.local/bin/gsconnect
++
+ case "$0" in
+     */*) EXTENSION_DIR=$(dirname $(realpath "$0")) ;;
+     *) EXTENSION_DIR=$(dirname $(realpath $(which $0))) ;;
+ esac
++if [ ! -f "${EXTENSION_DIR}/service/daemon.js" ]; then
++    >&2 echo "Cannot find service/daemon.js relative to script location!"
++    >&2 echo "Perhaps you copied the script instead of symlinking it?"
++    exit -1
++fi
+ exec /bin/env gjs -m "${EXTENSION_DIR}/service/daemon.js" "$@"
+-
